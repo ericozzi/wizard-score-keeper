@@ -8,6 +8,20 @@
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- Firebase config injection: replace YOUR_API_KEY, YOUR_APP_ID, YOUR_MEASUREMENT_ID with real values -->
+    <script>
+      window.__firebase_config = JSON.stringify({
+        apiKey: "YOUR_API_KEY",
+        authDomain: "wizard-web-c5c66.firebaseapp.com",
+        projectId: "wizard-web-c5c66",
+        storageBucket: "wizard-web-c5c66.firebasestorage.app",
+        messagingSenderId: "306669033759",
+        appId: "YOUR_APP_ID",
+        measurementId: "YOUR_MEASUREMENT_ID"
+      });
+    </script>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
