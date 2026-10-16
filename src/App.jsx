@@ -84,6 +84,7 @@ export default function App() {
         }
       } catch (err) {
         console.error("Auth initialization error:", err);
+        setErrorMessage('Auth initialization error: ' + (err?.message || err));
       }
     };
     initAuth();
@@ -92,6 +93,26 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Helper to ensure we have an authenticated user before writes
+  const ensureAuthenticated = async () => {
+    if (auth.currentUser) return auth.currentUser;
+    try {
+      let cred;
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        cred = await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        cred = await signInAnonymously(auth);
+      }
+      // signIn returns a UserCredential; return the user directly to avoid timing issues
+      console.debug('ensureAuthenticated signed in', cred.user?.uid);
+      return cred.user;
+    } catch (err) {
+      console.error('Authentication error:', err);
+      setErrorMessage('Authentication failed: ' + (err?.message || err));
+      return null;
+    }
+  };
 
   // Realtime listener: subscribe based on roomCode alone so UI updates even if auth hasn't finished
   useEffect(() => {
@@ -162,7 +183,7 @@ export default function App() {
           }
         } catch (err) {
           console.error(err);
-          setErrorMessage('Unable to auto-join room from invite link.');
+          setErrorMessage('Unable to auto-join room from invite link. ' + (err?.message || ''));
         }
       }
     };
@@ -176,8 +197,15 @@ export default function App() {
     }
     setErrorMessage('');
 
+    // Ensure authentication before attempting writes; Firestore rules often require request.auth
+    const userObj = await ensureAuthenticated();
+    if (!userObj) return; // error already set in ensureAuthenticated
+
+    // Mirror auth immediately in local state so UI recognizes us as host
+    setUser(userObj);
+
     const newCode = generateRoomCode();
-    const myUid = user ? user.uid : 'host_' + Math.random().toString(36).substr(2, 9);
+    const myUid = userObj.uid;
     const initialHostPlayerId = 'p_' + Date.now();
 
     const initialRoomData = {
@@ -205,7 +233,7 @@ export default function App() {
       setAssignedPlayerId(initialHostPlayerId);
     } catch (err) {
       console.error("Error creating room:", err);
-      setErrorMessage('Failed to create room.');
+      setErrorMessage('Failed to create room: ' + (err?.message || err));
     }
   };
 
@@ -271,7 +299,13 @@ export default function App() {
     }
     setErrorMessage('');
     const formattedCode = roomCode.trim().toUpperCase();
-    const myUid = user ? user.uid : 'user_' + Math.random().toString(36).substr(2, 9);
+
+    // Ensure authenticated for writes
+    const userObj = await ensureAuthenticated();
+    if (!userObj) return;
+    // Mirror auth locally immediately so subsequent UI checks see us as authenticated
+    setUser(userObj);
+    const myUid = userObj.uid;
 
     try {
       const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'wizard_rooms', formattedCode);
@@ -311,7 +345,7 @@ export default function App() {
       setActiveTab('input');
     } catch (err) {
       console.error("Error joining room:", err);
-      setErrorMessage('Unable to join room.');
+      setErrorMessage('Unable to join room: ' + (err?.message || err));
     }
   };
 
@@ -577,6 +611,20 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            <div className="flex items-center gap-3">
+              <button onClick={() => setShowRulesModal(true)} className="flex items-center gap-1 text-xs text-slate-400 hover:text-amber-300">
+                <BookOpen className="w-4 h-4" /> Rules
+              </button>
+              {isHost && (
+                <button onClick={handleResetGame} className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-400">
+                  <RefreshCw className="w-4 h-4" /> Reset
+                </button>
+              )}
+              <button onClick={handleExitGame} className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 ml-2 border-l border-slate-700 pl-3">
+                <LogOut className="w-4 h-4" /> Exit
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -780,235 +828,4 @@ export default function App() {
                                 <span className="text-xs font-mono font-bold text-amber-300 bg-slate-900 px-3 py-1 rounded-full border border-slate-700">
                                   Total: {score}
                                 </span>
-                              </div>
 
-                              {canEdit ? (
-                                <div className="flex flex-wrap gap-2">
-                                  {Array.from({ length: gameData.currentRound + 1 }, (_, i) => i).map((num) => {
-                                    const isSelected = currentBid === num;
-                                    return (
-                                      <button
-                                        key={num}
-                                        onClick={() => handleBidSubmit(p.id, num)}
-                                        className={`w-12 h-12 rounded-xl font-mono font-bold text-lg transition-all ${
-                                          isSelected
-                                            ? 'bg-amber-500 text-slate-950 scale-105 shadow-lg'
-                                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                                        }`}
-                                      >
-                                        {num}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="text-sm text-slate-500 py-2 flex items-center gap-2">
-                                  {currentBid !== undefined ? (
-                                    <><CheckCircle2 className="w-4 h-4 text-green-400"/> Bid placed: {currentBid}</>
-                                  ) : (
-                                    'Waiting to bid...'
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {isHost && (
-                        <div className="pt-2 pb-16">
-                          <button
-                            onClick={handleEndBidding}
-                            disabled={!allBidsIn}
-                            className={`w-full py-4 font-bold rounded-xl flex items-center justify-center gap-2 transition-all ${
-                              allBidsIn ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-800 text-slate-500'
-                            }`}
-                          >
-                            <Play className="w-5 h-5" /> End Bidding & Start Round
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* --- Tricks Entry Phase --- */}
-                  {gameData.status === 'playing' && (
-                    <div className="space-y-5">
-                      <div className="border-b border-slate-800 pb-3">
-                        <h3 className="font-bold text-indigo-400 text-lg">Record Tricks</h3>
-                        <p className="text-xs text-slate-400">Select how many tricks each player won.</p>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {players.map((p) => {
-                          const bid = gameData.bids ? (gameData.bids[p.id] ?? 0) : 0;
-                          const trick = currentTricks[p.id];
-                          const canEdit = isHost || assignedPlayerId === p.id;
-                          const score = latestScores[p.id] || 0;
-
-                          return (
-                            <div key={p.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800">
-                              <div className="flex justify-between items-center mb-4">
-                                <span className="font-bold text-slate-100">{p.name}</span>
-                                <div className="flex gap-2">
-                                  <span className="text-xs font-mono font-bold text-amber-300 bg-slate-900 px-3 py-1 rounded-full border border-slate-700">
-                                    Total: {score}
-                                  </span>
-                                  <span className="text-xs font-mono font-bold text-slate-300 bg-indigo-900/50 px-3 py-1 rounded-full border border-indigo-500/30">
-                                    Bid: {bid}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {canEdit ? (
-                                <div className="flex flex-wrap gap-2">
-                                  {Array.from({ length: gameData.currentRound + 1 }, (_, i) => i).map((num) => {
-                                    const isSelected = trick === num;
-                                    return (
-                                      <button
-                                        key={num}
-                                        onClick={() => setCurrentTricks({ ...currentTricks, [p.id]: num })}
-                                        className={`w-12 h-12 rounded-xl font-mono font-bold text-lg transition-all ${
-                                          isSelected
-                                            ? 'bg-indigo-500 text-white scale-105 shadow-lg'
-                                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                                        }`}
-                                      >
-                                        {num}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="text-sm text-slate-500 py-2 flex items-center gap-2">
-                                  {trick !== undefined ? (
-                                    <><CheckCircle2 className="w-4 h-4 text-indigo-400"/> Tricks won: {trick}</>
-                                  ) : (
-                                    'Waiting for tricks...'
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {isHost && (
-                        <div className="pt-2 pb-16">
-                          <button
-                            onClick={handleTricksSubmit}
-                            disabled={!isValidTricksSum}
-                            className={`w-full py-4 font-bold rounded-xl flex items-center justify-center gap-2 transition-all ${
-                              isValidTricksSum ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20' : 'bg-slate-800 text-slate-500'
-                            }`}
-                          >
-                            <ShieldCheck className="w-5 h-5" /> Calculate Scores & Next Round
-                          </button>
-                          {!isValidTricksSum && (
-                            <p className="text-center text-xs text-red-400 mt-2">
-                              Total tricks must exactly equal {gameData.currentRound} to continue.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Sticky Footer for Totals */}
-                <div className="sticky bottom-0 bg-slate-900 border-t border-slate-700/80 p-4 z-10 shadow-[0_-15px_25px_-5px_rgba(0,0,0,0.4)] flex justify-between items-center backdrop-blur-md">
-                  <div className="flex items-center gap-2 text-slate-300 font-semibold text-sm">
-                    <Sigma className="w-5 h-5 text-indigo-400"/>
-                    {gameData.status === 'bidding' ? 'Total Bids' : 'Total Won'}
-                  </div>
-                  <div className={`font-mono font-bold text-xl flex items-baseline gap-1 ${
-                    gameData.status === 'playing' 
-                      ? (isValidTricksSum ? 'text-emerald-400' : 'text-red-400')
-                      : 'text-amber-400'
-                  }`}>
-                    <span>{gameData.status === 'bidding' ? totalBidsSum : totalTricksSum}</span>
-                    <span className="text-sm text-slate-500 font-medium">/ {gameData.currentRound} Max</span>
-                  </div>
-                </div>
-
-              </div>
-            )}
-
-            {activeTab === 'history' && (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse min-w-[500px]">
-                  <thead>
-                    <tr className="border-b border-slate-700 text-slate-400">
-                      <th className="py-3 px-3 w-16">Rd</th>
-                      {players.map((p) => (
-                        <th key={p.id} className="py-3 px-3 text-center text-slate-200">
-                          {p.name}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {roundsHistory.length === 0 ? (
-                      <tr>
-                        <td colSpan={players.length + 1} className="py-8 text-center text-slate-500">
-                          No completed rounds yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      roundsHistory.map((rh, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/50">
-                          <td className="py-3 px-3 font-mono text-slate-400">R{rh.roundNum}</td>
-                          {players.map((p) => {
-                            const bid = rh.bids[p.id] ?? 0;
-                            const trick = rh.tricks[p.id] ?? 0;
-                            const score = rh.scores[p.id] ?? 0;
-                            const total = rh.cumulative[p.id] ?? 0;
-                            return (
-                              <td key={p.id} className="py-3 px-3 text-center">
-                                <div className="text-xs text-slate-400 mb-1">
-                                  B:{bid} <span className="mx-1">|</span> T:{trick}
-                                </div>
-                                <div className={`font-mono font-bold mb-1 ${bid === trick ? 'text-emerald-400' : 'text-red-400'}`}>
-                                  {score > 0 ? `+${score}` : score}
-                                </div>
-                                <div className="text-xs text-amber-300 font-mono">
-                                  {total}
-                                </div>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-          </div>
-        )}
-
-        {/* Rules Modal */}
-        {showRulesModal && (
-          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl shadow-black">
-              <h3 className="text-lg font-bold text-amber-300 mb-4 flex items-center gap-2">
-                <BookOpen className="w-5 h-5"/> Wizard Rules
-              </h3>
-              <ul className="text-sm text-slate-300 space-y-3 mb-6">
-                <li><strong>Correct Bid:</strong> +20 points + (10 × Tricks Won)</li>
-                <li><strong>Incorrect Bid:</strong> -10 points for every trick you are off by.</li>
-                <li><strong>Rounds:</strong> Max rounds based on 60 card deck (e.g., 4 players = 15 rounds).</li>
-                <li>Total tricks entered must equal the number of cards dealt in that round.</li>
-              </ul>
-              <button onClick={() => setShowRulesModal(false)} className="w-full py-3 bg-slate-800 hover:bg-slate-700 rounded-xl font-semibold transition-colors">
-                Close Rules
-              </button>
-            </div>
-          </div>
-        )}
-
-      </main>
-    </div>
-  );
-}
