@@ -27,7 +27,8 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'wizard-scorekeeper';
+// Use explicit __app_id if provided, otherwise default to the Firebase projectId (more robust)
+const appId = typeof __app_id !== 'undefined' ? __app_id : (firebaseConfig?.projectId || 'wizard-scorekeeper');
 
 const generateRoomCode = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -92,10 +93,13 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Realtime listener: subscribe based on roomCode alone so UI updates even if auth hasn't finished
   useEffect(() => {
-    if (!user || !roomCode) return;
+    if (!roomCode) return;
 
     const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'wizard_rooms', roomCode.toUpperCase());
+
+    console.debug('Setting up room snapshot listener for', roomRef.path);
 
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -105,11 +109,16 @@ export default function App() {
         // Keep local trick state in sync if host updates it
         if (data.tricks) setCurrentTricks(prev => ({ ...data.tricks, ...prev }));
 
-        // Map current user to a claimed player slot
-        const myUid = user.uid;
-        const linkedPlayer = data.players?.find(p => p.claimedByUid === myUid);
-        if (linkedPlayer) {
-          setAssignedPlayerId(linkedPlayer.id);
+        // Map current user to a claimed player slot if we have a user
+        const myUid = user?.uid;
+        if (myUid) {
+          const linkedPlayer = data.players?.find(p => p.claimedByUid === myUid);
+          if (linkedPlayer) {
+            setAssignedPlayerId(linkedPlayer.id);
+          } else {
+            // clear mapping if user no longer claims a slot
+            setAssignedPlayerId(null);
+          }
         }
       } else {
         setErrorMessage('Game room not found. Check your 4-character room code.');
@@ -120,8 +129,11 @@ export default function App() {
       setErrorMessage('Syncing error. Please check your connection.');
     });
 
-    return () => unsubscribe();
-  }, [user, roomCode]);
+    return () => {
+      console.debug('Tearing down room listener for', roomRef.path);
+      unsubscribe();
+    };
+  }, [roomCode, user]);
 
   useEffect(() => {
     const autoJoin = async () => {
@@ -188,6 +200,7 @@ export default function App() {
     try {
       const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'wizard_rooms', newCode);
       await setDoc(roomRef, initialRoomData);
+      console.debug('Room created:', roomRef.path);
       setRoomCode(newCode);
       setAssignedPlayerId(initialHostPlayerId);
     } catch (err) {
@@ -513,7 +526,7 @@ export default function App() {
               </div>
               <button
                 onClick={handleJoinRoom}
-                className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 text-sm"
+                className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
               >
                 <LogIn className="w-4 h-4" /> Join Room
               </button>
@@ -903,7 +916,7 @@ export default function App() {
                 </div>
 
                 {/* Sticky Footer for Totals */}
-                <div className="sticky bottom-0 bg-slate-900 border-t border-slate-700/80 p-4 z-10 shadow-[0_-15px_25px_-5px_rgba(0,0,0,0.4)] flex justify-between items-center backdrop-blur-md bg-opacity-95">
+                <div className="sticky bottom-0 bg-slate-900 border-t border-slate-700/80 p-4 z-10 shadow-[0_-15px_25px_-5px_rgba(0,0,0,0.4)] flex justify-between items-center backdrop-blur-md">
                   <div className="flex items-center gap-2 text-slate-300 font-semibold text-sm">
                     <Sigma className="w-5 h-5 text-indigo-400"/>
                     {gameData.status === 'bidding' ? 'Total Bids' : 'Total Won'}
