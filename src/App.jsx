@@ -12,15 +12,17 @@ import {
   History, Trophy, CheckCircle2, Sigma, ShieldCheck, LogOut
 } from 'lucide-react';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCNiSLCVm-oHyJ5AE_NrzWKVT2CMB-rAzE",
-  authDomain: "wizard-web-c5c66.firebaseapp.com",
-  projectId: "wizard-web-c5c66",
-  storageBucket: "wizard-web-c5c66.firebasestorage.app",
-  messagingSenderId: "306669033759",
-  appId: "1:306669033759:web:b84d787066cf766aef382a",
-  measurementId: "G-71BY730TPW"
-};
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "AIzaSyCNiSLCVm-oHyJ5AE_NrzWKVT2CMB-rAzE",
+      authDomain: "wizard-web-c5c66.firebaseapp.com",
+      projectId: "wizard-web-c5c66",
+      storageBucket: "wizard-web-c5c66.firebasestorage.app",
+      messagingSenderId: "306669033759",
+      appId: "1:306669033759:web:b84d787066cf766aef382a",
+      measurementId: "G-71BY730TPW"
+    };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
